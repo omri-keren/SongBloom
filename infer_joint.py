@@ -76,9 +76,9 @@ def main():
         )
 
         for i in range(args.n_samples):
-            # Pass only the joint condition
+            # Pass only the joint embedding condition with the correct key
             attributes, _ = model._prepare_tokens_and_attributes(
-                conditions={"joint_condition": [joint_condition]},
+                conditions={"joint_embed": [joint_condition]},
                 prompt=None, prompt_tokens=None
             )
             latent_seq, token_seq = model.diffusion.generate(None, attributes, **model.generation_params)
