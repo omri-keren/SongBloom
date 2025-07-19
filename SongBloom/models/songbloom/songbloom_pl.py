@@ -180,15 +180,16 @@ class SongBloom_Sampler:
                     # cond is a JointWavEmbedCondition
                     wavs = cond.wavs  # [N, C, T]
                     N = wavs.shape[0]
-                    # Compute embedding for each wav
-                    wav_embeds = []
-                    for i in range(N):
-                        wav_i = wavs[i].unsqueeze(0).to(self.device)  # [1, C, T]
-                        embed_i = self.compression_model.encode(wav_i)  # [1, D, T']
-                        wav_embeds.append(embed_i)
-                    wav_embeds = [e.squeeze(0) for e in wav_embeds]  # [D, T'] each
-                    # Stack to [N, D, T']
-                    wav_embeds = torch.stack(wav_embeds, dim=0)
+                    if self.fusion_method != 'concat_wav':
+                        # Compute embedding for each wav
+                        wav_embeds = []
+                        for i in range(N):
+                            wav_i = wavs[i].unsqueeze(0).to(self.device)  # [1, C, T]
+                            embed_i = self.compression_model.encode(wav_i)  # [1, D, T']
+                            wav_embeds.append(embed_i)
+                        wav_embeds = [e.squeeze(0) for e in wav_embeds]  # [D, T'] each
+                        # Stack to [N, D, T']
+                        wav_embeds = torch.stack(wav_embeds, dim=0)
                     # --- FUSION ---
                     if self.fusion_method == 'average':
                         fused = wav_embeds.mean(dim=0)
