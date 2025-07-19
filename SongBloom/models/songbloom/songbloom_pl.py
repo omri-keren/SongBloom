@@ -199,7 +199,7 @@ class SongBloom_Sampler:
                     elif self.fusion_method == 'max':
                         fused, _ = wav_embeds.max(dim=0)
                     elif self.fusion_method == 'concat':
-                        # Take 1/N of each wav along time axis, concatenate
+                        # Take first 1/N of each wav along time axis, concatenate
                         D, T_total = wav_embeds.shape[1], wav_embeds.shape[2]
                         T_each = T_total // N
                         segs = []
@@ -209,8 +209,7 @@ class SongBloom_Sampler:
                                 # pad if too short
                                 seg = torch.nn.functional.pad(wav_embeds[i], (0, T_each-T_i))
                             else:
-                                start = torch.randint(0, max(1, T_i-T_each+1), (1,)).item()
-                                seg = wav_embeds[i][:, start:start+T_each]
+                                seg = wav_embeds[i][:, :T_each]
                             segs.append(seg)
                         fused = torch.cat(segs, dim=1)
                         # If concat is longer than original, crop
