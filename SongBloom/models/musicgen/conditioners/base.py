@@ -147,6 +147,23 @@ class WavCondition(tp.NamedTuple):
     seek_time: tp.List[tp.Optional[float]] = []
 
 
+class JointWavEmbedCondition(tp.NamedTuple):
+    """
+    Generalization of WavCondition for multiple wavs.
+    Holds N wavs and their metadata for joint embedding.
+    - wavs: torch.Tensor of shape [N, C, T] (N wavs, C channels, T samples)
+    - lengths: torch.Tensor of shape [N] (length of each wav)
+    - sample_rates: List[int] of length N
+    - paths: List[Optional[str]] of length N (default empty)
+    - seek_times: List[Optional[float]] of length N (default empty)
+    """
+    wavs: torch.Tensor
+    lengths: torch.Tensor
+    sample_rates: tp.List[int]
+    paths: tp.List[tp.Optional[str]] = []
+    seek_times: tp.List[tp.Optional[float]] = []
+
+
 class JointEmbedCondition(tp.NamedTuple):
     wav: torch.Tensor
     text: tp.List[tp.Optional[str]]
