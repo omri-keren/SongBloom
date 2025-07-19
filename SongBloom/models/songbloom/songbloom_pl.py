@@ -219,8 +219,8 @@ class SongBloom_Sampler:
                             fused = torch.nn.functional.pad(fused, (0, T_total-fused.shape[1]))
                     else:
                         raise ValueError(f"Unknown fusion method: {self.fusion_method}")
-                    # Add batch dim [1, D, T']
-                    fused = fused.unsqueeze(0)
+                    # Add batch dim [1, D, T'] and move to device
+                    fused = fused.unsqueeze(0).to(self.device)
                     attr.wav[k] = WavCondition(
                         fused,
                         torch.tensor([fused.shape[-1]], device=self.device).long(),
