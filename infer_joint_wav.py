@@ -43,7 +43,7 @@ def main():
     parser.add_argument("--n-samples", type=int, default=2)
     parser.add_argument("--dtype", type=str, default='float32', choices=['float32', 'bfloat16'])
     parser.add_argument("--fusion-method", type=str, default='average',
-                        help="Fusion method for joint_wav_condition: average, product, min, max, concat")
+                        help="Fusion method for joint_wav_condition: average, product, min, max, concat_embed, concat_wav (concat is deprecated)")
     args = parser.parse_args()
 
     hf_download(args.repo_id, args.model_name, args.local_dir)
