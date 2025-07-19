@@ -198,24 +198,6 @@ class SongBloom_Sampler:
                         fused, _ = wav_embeds.min(dim=0)
                     elif self.fusion_method == 'max':
                         fused, _ = wav_embeds.max(dim=0)
-                    elif self.fusion_method == 'concat':
-                        print("[WARNING] 'concat' fusion is deprecated. Use 'concat_embed' or 'concat_wav' instead.")
-                        # For backward compatibility, use concat_embed
-                        D, T_total = wav_embeds.shape[1], wav_embeds.shape[2]
-                        T_each = T_total // N
-                        segs = []
-                        for i in range(N):
-                            T_i = wav_embeds.shape[2]
-                            if T_i < T_each:
-                                seg = torch.nn.functional.pad(wav_embeds[i], (0, T_each-T_i))
-                            else:
-                                seg = wav_embeds[i][:, :T_each]
-                            segs.append(seg)
-                        fused = torch.cat(segs, dim=1)
-                        if fused.shape[1] > T_total:
-                            fused = fused[:, :T_total]
-                        elif fused.shape[1] < T_total:
-                            fused = torch.nn.functional.pad(fused, (0, T_total-fused.shape[1]))
                     elif self.fusion_method == 'concat_embed':
                         # Concatenate the embeddings (first 1/N of each embedding)
                         D, T_total = wav_embeds.shape[1], wav_embeds.shape[2]
