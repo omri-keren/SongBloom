@@ -61,7 +61,7 @@ class SongBloom_PL(pl.LightningModule):
 class SongBloom_Sampler:    
     
     def __init__(self, compression_model: StableVAE, diffusion: MVSA_DiTAR, lyric_processor_key,
-                 max_duration: float, prompt_duration: tp.Optional[float] = None):
+                 max_duration: float, prompt_duration: tp.Optional[float] = None, fusion_method: str = 'average'):
         self.compression_model = compression_model
         self.diffusion = diffusion
         self.lyric_processor_key = lyric_processor_key
@@ -71,6 +71,7 @@ class SongBloom_Sampler:
         assert max_duration is not None
         self.max_duration: float = max_duration
         self.prompt_duration = prompt_duration
+        self.fusion_method = fusion_method
         
         
         self.device = next(iter(diffusion.parameters())).device
@@ -174,6 +175,60 @@ class SongBloom_Sampler:
         for k in self.diffusion.condition_provider.conditioners:
             conds = conditions.pop(k, [None for _ in attributes])
             for attr, cond in zip(attributes, conds):
+                # --- JOINT WAV FUSION ---
+                if k == 'joint_wav_condition' and cond is not None:
+                    # cond is a JointWavEmbedCondition
+                    wavs = cond.wavs  # [N, C, T]
+                    N = wavs.shape[0]
+                    # Compute embedding for each wav
+                    wav_embeds = []
+                    for i in range(N):
+                        wav_i = wavs[i].unsqueeze(0).to(self.device)  # [1, C, T]
+                        embed_i = self.compression_model.encode(wav_i)  # [1, D, T']
+                        wav_embeds.append(embed_i)
+                    wav_embeds = [e.squeeze(0) for e in wav_embeds]  # [D, T'] each
+                    # Stack to [N, D, T']
+                    wav_embeds = torch.stack(wav_embeds, dim=0)
+                    # --- FUSION ---
+                    if self.fusion_method == 'average':
+                        fused = wav_embeds.mean(dim=0)
+                    elif self.fusion_method == 'product':
+                        fused = wav_embeds.prod(dim=0)
+                    elif self.fusion_method == 'min':
+                        fused, _ = wav_embeds.min(dim=0)
+                    elif self.fusion_method == 'max':
+                        fused, _ = wav_embeds.max(dim=0)
+                    elif self.fusion_method == 'concat':
+                        # Take 1/N of each wav along time axis, concatenate
+                        D, T_total = wav_embeds.shape[1], wav_embeds.shape[2]
+                        T_each = T_total // N
+                        segs = []
+                        for i in range(N):
+                            T_i = wav_embeds.shape[2]
+                            if T_i < T_each:
+                                # pad if too short
+                                seg = torch.nn.functional.pad(wav_embeds[i], (0, T_each-T_i))
+                            else:
+                                start = torch.randint(0, max(1, T_i-T_each+1), (1,)).item()
+                                seg = wav_embeds[i][:, start:start+T_each]
+                            segs.append(seg)
+                        fused = torch.cat(segs, dim=1)
+                        # If concat is longer than original, crop
+                        if fused.shape[1] > T_total:
+                            fused = fused[:, :T_total]
+                        elif fused.shape[1] < T_total:
+                            fused = torch.nn.functional.pad(fused, (0, T_total-fused.shape[1]))
+                    else:
+                        raise ValueError(f"Unknown fusion method: {self.fusion_method}")
+                    # Add batch dim [1, D, T']
+                    fused = fused.unsqueeze(0)
+                    attr.wav[k] = WavCondition(
+                        fused,
+                        torch.tensor([fused.shape[-1]], device=self.device).long(),
+                        sample_rate=[self.sample_rate],
+                        path=[None]
+                    )
+                # --- END JOINT WAV FUSION ---
                 if self.diffusion.condition_provider.conditioner_type[k] == 'wav':
                     if cond is None:
                         attr.wav[k] = WavCondition(

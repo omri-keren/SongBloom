@@ -42,13 +42,15 @@ def main():
     parser.add_argument("--output-dir", type=str, default="./output")
     parser.add_argument("--n-samples", type=int, default=2)
     parser.add_argument("--dtype", type=str, default='float32', choices=['float32', 'bfloat16'])
+    parser.add_argument("--fusion-method", type=str, default='average',
+                        help="Fusion method for joint_wav_condition: average, product, min, max, concat")
     args = parser.parse_args()
 
     hf_download(args.repo_id, args.model_name, args.local_dir)
     cfg = load_config(f"{args.local_dir}/{args.model_name}.yaml", parent_dir=args.local_dir)
   
     dtype = torch.float32 if args.dtype == 'float32' else torch.bfloat16
-    model = SongBloom_Sampler.build_from_trainer(cfg, strict=True, dtype=dtype)
+    model = SongBloom_Sampler.build_from_trainer(cfg, strict=True, dtype=dtype, fusion_method=args.fusion_method)
     model.set_generation_params(**cfg.inference)
           
     os.makedirs(args.output_dir, exist_ok=True)
