@@ -61,14 +61,10 @@ def main():
     for test_sample in input_lines:
         idx = test_sample["idx"]
         lyrics = test_sample["lyrics"]
-        # Support two wavs per sample, fallback to one if only one is present
-        prompt_wav_paths = []
-        if "prompt_wav1" in test_sample:
-            prompt_wav_paths.append(test_sample["prompt_wav1"])
-        if "prompt_wav2" in test_sample:
-            prompt_wav_paths.append(test_sample["prompt_wav2"])
-        if not prompt_wav_paths and "prompt_wav" in test_sample:
-            prompt_wav_paths.append(test_sample["prompt_wav"])
+        # Expect 'prompt_wavs' as a list of filenames
+        prompt_wav_paths = test_sample.get("prompt_wavs", None)
+        if not prompt_wav_paths or not isinstance(prompt_wav_paths, list) or len(prompt_wav_paths) == 0:
+            raise ValueError(f"Sample {idx} is missing 'prompt_wavs' or it is empty!")
 
         wavs = []
         lengths = []
@@ -82,9 +78,6 @@ def main():
             wavs.append(wav)
             lengths.append(wav.shape[-1])
             sample_rates.append(model.sample_rate)
-        if len(wavs) == 0:
-            raise ValueError("No wavs found in input sample!")
-        # Stack into [N, C, T]
         wavs_tensor = torch.stack(wavs, dim=0)
         lengths_tensor = torch.tensor(lengths).long()
 
