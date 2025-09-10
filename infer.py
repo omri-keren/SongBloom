@@ -5,7 +5,7 @@ import json
 from omegaconf import MISSING, OmegaConf,DictConfig
 from huggingface_hub import hf_hub_download
 
-os.environ['DISABLE_FLASH_ATTN'] = "1"
+os.environ['DISABLE_FLASH_ATTN'] = "0"
 from SongBloom.models.songbloom.songbloom_pl import SongBloom_Sampler
 
 
@@ -49,10 +49,11 @@ def main():
     parser.add_argument("--repo-id", type=str, default="CypressYang/SongBloom")
     parser.add_argument("--model-name", type=str, default="songbloom_full_150s")
     parser.add_argument("--local-dir", type=str, default="./cache")
-    parser.add_argument("--input-jsonl", type=str, required=True)
+    # parser.add_argument("--input-jsonl", type=str, required=True)
+    parser.add_argument("--input-jsonl", type=str, default='example/test.jsonl')
     parser.add_argument("--output-dir", type=str, default="./output")
     parser.add_argument("--n-samples", type=int, default=2)
-    parser.add_argument("--dtype", type=str, default='float32', choices=['float32', 'bfloat16'])
+    parser.add_argument("--dtype", type=str, default='bfloat16', choices=['float32', 'bfloat16'])
     
     args = parser.parse_args()
 
