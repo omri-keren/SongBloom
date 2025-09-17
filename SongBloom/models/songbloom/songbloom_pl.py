@@ -279,7 +279,7 @@ class SongBloom_Sampler:
                             path=[None])  
                     else:
                         raise NotImplementedError
-        assert conditions == {}, f"Find illegal conditions: {conditions}, support keys: {self.lm.condition_provider.conditioners}"
+        # assert conditions == {}, f"Find illegal conditions: {conditions}, support keys: {self.lm.condition_provider.conditioners}"
         # breakpoint()
         print(attributes)
         

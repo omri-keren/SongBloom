@@ -50,9 +50,11 @@ def main():
     parser.add_argument("--model-name", type=str, default="songbloom_full_150s")
     parser.add_argument("--local-dir", type=str, default="./cache")
     # parser.add_argument("--input-jsonl", type=str, required=True)
-    parser.add_argument("--input-jsonl", type=str, default='example/test.jsonl')
+    # parser.add_argument("--input-jsonl", type=str, default='example/fly.jsonl')
+    # parser.add_argument("--input-jsonl", type=str, default='example/universo.jsonl')
+    parser.add_argument("--input-jsonl", type=str, default='example/high_on_life.jsonl')
     parser.add_argument("--output-dir", type=str, default="./output")
-    parser.add_argument("--n-samples", type=int, default=2)
+    parser.add_argument("--n-samples", type=int, default=1)
     parser.add_argument("--dtype", type=str, default='bfloat16', choices=['float32', 'bfloat16'])
     
     args = parser.parse_args()

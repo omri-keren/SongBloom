@@ -38,11 +38,11 @@ def main():
     parser.add_argument("--repo-id", type=str, default="CypressYang/SongBloom")
     parser.add_argument("--model-name", type=str, default="songbloom_full_150s")
     parser.add_argument("--local-dir", type=str, default="./cache")
-    parser.add_argument("--input-jsonl", type=str, required=True)
+    parser.add_argument("--input-jsonl", type=str, default='example/multiple_wavs.jsonl')
     parser.add_argument("--output-dir", type=str, default="./output")
-    parser.add_argument("--n-samples", type=int, default=2)
+    parser.add_argument("--n-samples", type=int, default=1)
     parser.add_argument("--dtype", type=str, default='float32', choices=['float32', 'bfloat16'])
-    parser.add_argument("--fusion-method", type=str, default='average',
+    parser.add_argument("--fusion-method", type=str, default='product',
                         help="Fusion method for joint_wav_condition: average, product, min, max, concat_embed, concat_wav (concat is deprecated)")
     args = parser.parse_args()
 
@@ -50,7 +50,7 @@ def main():
     cfg = load_config(f"{args.local_dir}/{args.model_name}.yaml", parent_dir=args.local_dir)
   
     dtype = torch.float32 if args.dtype == 'float32' else torch.bfloat16
-    model = SongBloom_Sampler.build_from_trainer(cfg, strict=True, dtype=dtype, fusion_method=args.fusion_method)
+    model = SongBloom_Sampler.build_from_trainer(cfg, strict=True, dtype=dtype)
     model.set_generation_params(**cfg.inference)
           
     os.makedirs(args.output_dir, exist_ok=True)
@@ -93,7 +93,7 @@ def main():
         for i in range(args.n_samples):
             # Pass only the joint wav condition (assuming model expects 'joint_wav_condition' key)
             attributes, _ = model._prepare_tokens_and_attributes(
-                conditions={"joint_wav_condition": [joint_wav_condition], "lyrics": [lyrics]},
+                conditions={"joint_wav_condition": [joint_wav_condition], "lyrics": [model._process_lyric(lyrics)]},
                 prompt=None, prompt_tokens=None
             )
             latent_seq, token_seq = model.diffusion.generate(None, attributes, **model.generation_params)

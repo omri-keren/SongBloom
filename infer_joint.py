@@ -38,7 +38,7 @@ def main():
     parser.add_argument("--repo-id", type=str, default="CypressYang/SongBloom")
     parser.add_argument("--model-name", type=str, default="songbloom_full_150s")
     parser.add_argument("--local-dir", type=str, default="./cache")
-    parser.add_argument("--input-jsonl", type=str, required=True)
+    parser.add_argument("--input-jsonl", type=str, default='example/multiple_wavs.jsonl')
     parser.add_argument("--output-dir", type=str, default="./output")
     parser.add_argument("--n-samples", type=int, default=2)
     parser.add_argument("--dtype", type=str, default='float32', choices=['float32', 'bfloat16'])
