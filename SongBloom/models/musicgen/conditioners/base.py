@@ -145,6 +145,7 @@ class WavCondition(tp.NamedTuple):
     sample_rate: tp.List[int]
     path: tp.List[tp.Optional[str]] = []
     seek_time: tp.List[tp.Optional[float]] = []
+    fusion_method: str = ''  # 'concat' or 'add'
 
 
 class JointWavEmbedCondition(tp.NamedTuple):
@@ -178,6 +179,7 @@ class ConditioningAttributes:
     text: tp.Dict[str, tp.Optional[str]] = field(default_factory=dict)
     wav: tp.Dict[str, WavCondition] = field(default_factory=dict)
     joint_embed: tp.Dict[str, JointEmbedCondition] = field(default_factory=dict)
+    joint_wav_condition: tp.Dict[str, JointWavEmbedCondition] = field(default_factory=dict)
 
     def __getitem__(self, item):
         return getattr(self, item)
@@ -193,6 +195,10 @@ class ConditioningAttributes:
     @property
     def joint_embed_attributes(self):
         return self.joint_embed.keys()
+
+    @property
+    def joint_wav_condition_attributes(self):
+        return self.joint_wav_condition.keys()
 
     @property
     def attributes(self):
@@ -481,6 +487,57 @@ class WaveformConditioner(BaseConditioner):
         super().__init__(dim, output_dim, input_token, padding_idx)
 
     def tokenize(self, x: WavCondition) -> WavCondition:
+        wav, length, sample_rate, path, seek_time, fusion_method = x
+        assert length is not None
+        return WavCondition(wav, length, sample_rate, path, seek_time, fusion_method)
+
+    def _get_wav_embedding(self, x: WavCondition) -> torch.Tensor:
+        """Gets as input a WavCondition and returns a dense embedding."""
+        raise NotImplementedError()
+
+    def _downsampling_factor(self):
+        """Returns the downsampling factor of the embedding model."""
+        raise NotImplementedError()
+
+    def forward(self, x: WavCondition) -> ConditionType:
+        """Extract condition embedding and mask from a waveform and its metadata.
+        Args:
+            x (WavCondition): Waveform condition containing raw waveform and metadata.
+        Returns:
+            ConditionType: a dense vector representing the conditioning along with its mask
+        """
+
+        wav, lengths, *_ = x
+        # import pdb; pdb.set_trace()
+        with torch.no_grad():
+            embeds = self._get_wav_embedding(x)
+        embeds = embeds.to(self.output_proj.weight)
+        embeds = self.output_proj(embeds)
+        # import pdb; pdb.set_trace()
+        if lengths is not None:
+            lengths = lengths / self._downsampling_factor()
+            mask = length_to_mask(lengths, max_len=embeds.shape[1]).int()  # type: ignore
+        else:
+            mask = torch.ones_like(embeds)
+        embeds = (embeds * mask.unsqueeze(2))
+
+        return embeds, mask
+
+class JointWavEmbedConditioner(BaseConditioner):
+    """Base class for all conditioners that take a waveform as input.
+        Classes that inherit must implement `_get_wav_embedding` that outputs
+        a continuous tensor, and `_downsampling_factor` that returns the down-sampling
+        factor of the embedding model.
+
+        Args:
+            dim (int): The internal representation dimension.
+            output_dim (int): Output dimension.
+        """
+
+    def __init__(self, dim: int, output_dim: int, input_token=False, padding_idx=None):
+        super().__init__(dim, output_dim, input_token, padding_idx)
+
+    def tokenize(self, x: WavCondition) -> WavCondition:
         wav, length, sample_rate, path, seek_time = x
         assert length is not None
         return WavCondition(wav, length, sample_rate, path, seek_time)
@@ -516,6 +573,7 @@ class WaveformConditioner(BaseConditioner):
         embeds = (embeds * mask.unsqueeze(2))
 
         return embeds, mask
+
 
 
 class JointEmbeddingConditioner(BaseConditioner):
@@ -589,6 +647,8 @@ class ConditioningProvider(nn.Module):
                 return "text"
             elif isinstance(c, JointEmbeddingConditioner):
                 return "joint_embed"
+            elif isinstance(c, JointWavEmbedConditioner):
+                return 'joint_wav_condition'
             else:
                 raise NotImplementedError(f"{type(c)} are not Implemented!")
         self.conditioner_type = {k: _check_conditioner_type(self.conditioners[k]) for k in self.conditioners}
@@ -713,27 +773,50 @@ class ConditioningProvider(nn.Module):
         sample_rates = defaultdict(list)
         paths = defaultdict(list)
         seek_times = defaultdict(list)
+        fusion_methods = defaultdict(list)
         out: tp.Dict[str, WavCondition] = {}
+        has_fusion = False
+        wav_shape = None
 
         for sample in samples:
             for attribute in self.wav_conditions:
-                wav, length, sample_rate, path, seek_time = sample.wav[attribute]
+                wav, length, sample_rate, path, seek_time, fusion_method = sample.wav[attribute]
                 assert wav.dim() == 3, f"Got wav with dim={wav.dim()}, but expected 3 [1, C, T]"
-                assert wav.size(0) == 1, f"Got wav [B, C, T] with shape={wav.shape}, but expected B == 1"
-                # mono-channel conditioning
-                # wav = wav.mean(1, keepdim=True)  # [1, 1, T] # by cyy, 为了实现后续功能注释掉了，请手动确保channel=1，or 输入channel 符合预期
-                wavs[attribute].append(wav.flatten())  # [C*T]
+                if fusion_method == '':
+                    if wav.size(0) != 1:
+                        wav = wav[0:1, ...]
+                    assert wav.size(0) == 1, f"Got wav [B, C, T] with shape={wav.shape}, but expected B == 1"
+                    # mono-channel conditioning
+                    # wav = wav.mean(1, keepdim=True)  # [1, 1, T] # by cyy, 为了实现后续功能注释掉了，请手动确保channel=1，or 输入channel 符合预期
+                    if not has_fusion:
+                        wavs[attribute].append(wav.flatten())  # [C*T]
+                    else:
+                        wav = wav.expand(1 ,1, wav_shape)  # [1, C, T]
+                        length = length[0:1]
+                    wavs[attribute].append(wav)
+                else:
+                    wavs[attribute].append(wav)  # [C, T]
+                    has_fusion = True
+                    wav_shape = wav.shape[-1]
                 lengths[attribute].append(length)
                 sample_rates[attribute].extend(sample_rate)
                 paths[attribute].extend(path)
                 seek_times[attribute].extend(seek_time)
+                fusion_methods[attribute].append(fusion_method)
 
         # stack all wavs to a single tensor
         for attribute in self.wav_conditions:
-            stacked_wav, _ = collate(wavs[attribute], dim=0)
-            out[attribute] = WavCondition(
-                stacked_wav.unsqueeze(1), torch.cat(lengths[attribute]), sample_rates[attribute],
-                paths[attribute], seek_times[attribute])
+            if fusion_methods[attribute][0] == '' or fusion_methods[attribute][0] == 'concat_wav':
+                stacked_wav, _ = collate(wavs[attribute], dim=0)
+                out[attribute] = WavCondition(
+                    stacked_wav.unsqueeze(1), torch.cat(lengths[attribute]), sample_rates[attribute],
+                    paths[attribute], seek_times[attribute], fusion_methods[attribute])
+            else:
+                # stacked_wav, _ = collate(wavs[attribute], dim=0)
+                stacked_wav = torch.cat(wavs[attribute], dim=0)
+                out[attribute] = WavCondition(
+                    stacked_wav, torch.cat(lengths[attribute]), sample_rates[attribute],
+                    paths[attribute], seek_times[attribute], fusion_methods[attribute])
 
         return out
 

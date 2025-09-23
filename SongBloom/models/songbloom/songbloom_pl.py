@@ -82,7 +82,7 @@ class SongBloom_Sampler:
         self._progress_callback: tp.Optional[tp.Callable[[int, int], None]] = None
 
     @classmethod
-    def build_from_trainer(cls, cfg, strict=True, dtype=torch.float32):
+    def build_from_trainer(cls, cfg, strict=True, dtype=torch.float32, fusion_method='average'):
         model_light = SongBloom_PL(cfg)
         incompatible = model_light.load_state_dict(torch.load(cfg.pretrained_path, map_location='cpu'), strict=strict)
         
@@ -96,8 +96,8 @@ class SongBloom_Sampler:
             diffusion = model_light.model,
             lyric_processor_key = lyric_processor_key,
             max_duration = cfg.max_dur,
-            prompt_duration = cfg.sr * cfg.train_dataset.prompt_len
-            
+            prompt_duration = cfg.sr * cfg.train_dataset.prompt_len,
+            fusion_method = fusion_method
         )
         model.set_generation_params(**cfg.inference)
         return model
@@ -176,47 +176,13 @@ class SongBloom_Sampler:
             conds = conditions.pop(k, [None for _ in attributes])
             for attr, cond in zip(attributes, conds):
                 # --- JOINT WAV FUSION ---
-                if k == 'joint_wav_condition' and cond is not None:
+                if self.diffusion.condition_provider.conditioner_type[k] == 'wav' and 'joint_wav_condition' in conditions:
                     # cond is a JointWavEmbedCondition
-                    wavs = cond.wavs  # [N, C, T]
+                    wavs = conditions['joint_wav_condition'][0].wavs  # [N, C, T]
                     N = wavs.shape[0]
                     if self.fusion_method != 'concat_wav':
-                        # Compute embedding for each wav
-                        wav_embeds = []
-                        for i in range(N):
-                            wav_i = wavs[i].unsqueeze(0).to(self.device)  # [1, C, T]
-                            embed_i = self.compression_model.encode(wav_i)  # [1, D, T']
-                            wav_embeds.append(embed_i)
-                        wav_embeds = [e.squeeze(0) for e in wav_embeds]  # [D, T'] each
-                        # Stack to [N, D, T']
-                        wav_embeds = torch.stack(wav_embeds, dim=0)
-                    # --- FUSION ---
-                    if self.fusion_method == 'average':
-                        fused = wav_embeds.mean(dim=0)
-                    elif self.fusion_method == 'product':
-                        fused = wav_embeds.prod(dim=0)
-                    elif self.fusion_method == 'min':
-                        fused, _ = wav_embeds.min(dim=0)
-                    elif self.fusion_method == 'max':
-                        fused, _ = wav_embeds.max(dim=0)
-                    elif self.fusion_method == 'concat_embed':
-                        # Concatenate the embeddings (first 1/N of each embedding)
-                        D, T_total = wav_embeds.shape[1], wav_embeds.shape[2]
-                        T_each = T_total // N
-                        segs = []
-                        for i in range(N):
-                            T_i = wav_embeds.shape[2]
-                            if T_i < T_each:
-                                seg = torch.nn.functional.pad(wav_embeds[i], (0, T_each-T_i))
-                            else:
-                                seg = wav_embeds[i][:, :T_each]
-                            segs.append(seg)
-                        fused = torch.cat(segs, dim=1)
-                        if fused.shape[1] > T_total:
-                            fused = fused[:, :T_total]
-                        elif fused.shape[1] < T_total:
-                            fused = torch.nn.functional.pad(fused, (0, T_total-fused.shape[1]))
-                    elif self.fusion_method == 'concat_wav':
+                        fused = wavs.to(self.device)
+                    else:
                         # Take first 1/N of each wav (raw), concatenate, then embed as a single wav
                         C = wavs.shape[1]
                         T_total = wavs.shape[2]
@@ -234,20 +200,15 @@ class SongBloom_Sampler:
                             concat_wav = concat_wav[:, :T_total]
                         elif concat_wav.shape[1] < T_total:
                             concat_wav = torch.nn.functional.pad(concat_wav, (0, T_total-concat_wav.shape[1]))
-                        concat_wav = concat_wav.unsqueeze(0).to(self.device)  # [1, C, T_total]
-                        fused = self.compression_model.encode(concat_wav).squeeze(0)
-                    else:
-                        raise ValueError(f"Unknown fusion method: {self.fusion_method}")
-                    # Add batch dim [1, D, T'] and move to device
-                    fused = fused.unsqueeze(0).to(self.device)
+                        fused = concat_wav.unsqueeze(0).to(self.device)
                     attr.wav[k] = WavCondition(
                         fused,
                         torch.tensor([fused.shape[-1]], device=self.device).long(),
                         sample_rate=[self.sample_rate],
-                        path=[None]
+                        path=[None], fusion_method=self.fusion_method,
                     )
                 # --- END JOINT WAV FUSION ---
-                if self.diffusion.condition_provider.conditioner_type[k] == 'wav':
+                elif self.diffusion.condition_provider.conditioner_type[k] == 'wav':
                     if cond is None:
                         attr.wav[k] = WavCondition(
                             torch.zeros((1, 1, 1), device=self.device),

@@ -53,7 +53,50 @@ class AudioTokenizerConditioner(WaveformConditioner):
                 audio_latents = wav.transpose(-1,-2)
             else:
                 with torch.no_grad():
-                    audio_latents = self.tokenizer.encode(wav).transpose(-1,-2)
+                    fusion_method = x.fusion_method[0]
+                    if fusion_method == '' or fusion_method == 'concat_wav':
+                        # audio_latents = self.tokenizer.encode(wav).transpose(-1,-2)
+                        audio_latents = self.tokenizer.encode(wav[0].unsqueeze(0)).transpose(-1,-2)
+                    else:
+                        N = wav.shape[0] - 1 # since there is null condition
+                        # TODO: think what to do with null conditioner
+                        # Compute embedding for each wav
+                        wav_embeds = []
+                        for i in range(N):
+                            wav_i = wav[i].unsqueeze(0)
+                            embed_i = self.tokenizer.encode(wav_i)  # [1, D, T']
+                            wav_embeds.append(embed_i)
+                        wav_embeds = [e.squeeze(0) for e in wav_embeds]  # [D, T'] each
+                        # Stack to [N, D, T']
+                        wav_embeds = torch.stack(wav_embeds, dim=0)
+
+                        if fusion_method == 'average':
+                            fused = wav_embeds.mean(dim=0, keepdim=True)
+                        elif fusion_method == 'product':
+                            fused = wav_embeds.prod(dim=0, keepdim=True)
+                        elif fusion_method == 'min':
+                            fused, _ = wav_embeds.min(dim=0, keepdim=True)
+                        elif fusion_method == 'max':
+                            fused, _ = wav_embeds.max(dim=0, keepdim=True)
+                        elif fusion_method == 'concat_embed':
+                            # Concatenate the embeddings (first 1/N of each embedding)
+                            D, T_total = wav_embeds.shape[1], wav_embeds.shape[2]
+                            T_each = T_total // N
+                            segs = []
+                            for i in range(N):
+                                T_i = wav_embeds.shape[2]
+                                if T_i < T_each:
+                                    seg = torch.nn.functional.pad(wav_embeds[i], (0, T_each-T_i))
+                                else:
+                                    seg = wav_embeds[i][:, :T_each]
+                                segs.append(seg)
+                            fused = torch.cat(segs, dim=1)
+                            if fused.shape[1] > T_total:
+                                fused = fused[:, :T_total]
+                            elif fused.shape[1] < T_total:
+                                fused = torch.nn.functional.pad(fused, (0, T_total-fused.shape[1]))
+                            fused = fused.unsqueeze(0)
+                        audio_latents = fused.transpose(-1, -2)
                     # print('transform wav to vae')
             audio_latents = self.output_proj(audio_latents)
 

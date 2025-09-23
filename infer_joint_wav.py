@@ -8,6 +8,7 @@ from huggingface_hub import hf_hub_download
 os.environ['DISABLE_FLASH_ATTN'] = "1"
 from SongBloom.models.songbloom.songbloom_pl import SongBloom_Sampler
 from SongBloom.models.musicgen.conditioners.base import JointWavEmbedCondition
+from convert_flac_to_wav import convert_file
 
 def hf_download(repo_id="CypressYang/SongBloom", model_name="songbloom_full_150s", local_dir="./cache", **kwargs):
     cfg_path = hf_hub_download(
@@ -42,7 +43,7 @@ def main():
     parser.add_argument("--output-dir", type=str, default="./output")
     parser.add_argument("--n-samples", type=int, default=1)
     parser.add_argument("--dtype", type=str, default='float32', choices=['float32', 'bfloat16'])
-    parser.add_argument("--fusion-method", type=str, default='product',
+    parser.add_argument("--fusion-method", type=str, default='concat_wav',
                         help="Fusion method for joint_wav_condition: average, product, min, max, concat_embed, concat_wav (concat is deprecated)")
     args = parser.parse_args()
 
@@ -50,55 +51,58 @@ def main():
     cfg = load_config(f"{args.local_dir}/{args.model_name}.yaml", parent_dir=args.local_dir)
   
     dtype = torch.float32 if args.dtype == 'float32' else torch.bfloat16
-    model = SongBloom_Sampler.build_from_trainer(cfg, strict=True, dtype=dtype)
-    model.set_generation_params(**cfg.inference)
-          
-    os.makedirs(args.output_dir, exist_ok=True)
-    
-    input_lines = open(args.input_jsonl, 'r').readlines()
-    input_lines = [json.loads(l.strip()) for l in input_lines]
-    
-    for test_sample in input_lines:
-        idx = test_sample["idx"]
-        lyrics = test_sample["lyrics"]
-        # Expect 'prompt_wavs' as a list of filenames
-        prompt_wav_paths = test_sample.get("prompt_wavs", None)
-        if not prompt_wav_paths or not isinstance(prompt_wav_paths, list) or len(prompt_wav_paths) == 0:
-            raise ValueError(f"Sample {idx} is missing 'prompt_wavs' or it is empty!")
+    for fusion_method in ['concat_embed', 'min', 'max', 'product']:
+        model = SongBloom_Sampler.build_from_trainer(cfg, strict=True, dtype=dtype, fusion_method=fusion_method)
+        model.set_generation_params(**cfg.inference)
+            
+        os.makedirs(args.output_dir, exist_ok=True)
+        
+        input_lines = open(args.input_jsonl, 'r').readlines()
+        input_lines = [json.loads(l.strip()) for l in input_lines]
+        
+        for test_sample in input_lines:
+            # idx = test_sample["idx"]
+            idx = f"high_on_life_universo_{fusion_method}_with_fly_lyrics"
+            lyrics = test_sample["lyrics"]
+            # Expect 'prompt_wavs' as a list of filenames
+            prompt_wav_paths = test_sample.get("prompt_wavs", None)
+            if not prompt_wav_paths or not isinstance(prompt_wav_paths, list) or len(prompt_wav_paths) == 0:
+                raise ValueError(f"Sample {idx} is missing 'prompt_wavs' or it is empty!")
 
-        wavs = []
-        lengths = []
-        sample_rates = []
-        for wav_path in prompt_wav_paths:
-            wav, sr = torchaudio.load(wav_path)
-            if sr != model.sample_rate:
-                wav = torchaudio.functional.resample(wav, sr, model.sample_rate)
-            wav = wav.mean(dim=0, keepdim=True).to(dtype)
-            wav = wav[..., :10*model.sample_rate]
-            wavs.append(wav)
-            lengths.append(wav.shape[-1])
-            sample_rates.append(model.sample_rate)
-        wavs_tensor = torch.stack(wavs, dim=0)
-        lengths_tensor = torch.tensor(lengths).long()
+            wavs = []
+            lengths = []
+            sample_rates = []
+            for wav_path in prompt_wav_paths:
+                wav, sr = torchaudio.load(wav_path)
+                if sr != model.sample_rate:
+                    wav = torchaudio.functional.resample(wav, sr, model.sample_rate)
+                wav = wav.mean(dim=0, keepdim=True).to(dtype)
+                wav = wav[..., :10*model.sample_rate]
+                wavs.append(wav)
+                lengths.append(wav.shape[-1])
+                sample_rates.append(model.sample_rate)
+            wavs_tensor = torch.stack(wavs, dim=0)
+            lengths_tensor = torch.tensor(lengths).long()
 
-        # Construct JointWavEmbedCondition
-        joint_wav_condition = JointWavEmbedCondition(
-            wavs=wavs_tensor,
-            lengths=lengths_tensor,
-            sample_rates=sample_rates,
-            paths=prompt_wav_paths,
-            seek_times=[None]*len(wavs)
-        )
-
-        for i in range(args.n_samples):
-            # Pass only the joint wav condition (assuming model expects 'joint_wav_condition' key)
-            attributes, _ = model._prepare_tokens_and_attributes(
-                conditions={"joint_wav_condition": [joint_wav_condition], "lyrics": [model._process_lyric(lyrics)]},
-                prompt=None, prompt_tokens=None
+            # Construct JointWavEmbedCondition
+            joint_wav_condition = JointWavEmbedCondition(
+                wavs=wavs_tensor,
+                lengths=lengths_tensor,
+                sample_rates=sample_rates,
+                paths=prompt_wav_paths,
+                seek_times=[None]*len(wavs)
             )
-            latent_seq, token_seq = model.diffusion.generate(None, attributes, **model.generation_params)
-            audio_recon = model.compression_model.decode(latent_seq).float()
-            torchaudio.save(f'{args.output_dir}/{idx}_s{i}.flac', audio_recon[0].cpu().float(), model.sample_rate)
+
+            for i in range(args.n_samples):
+                # Pass only the joint wav condition (assuming model expects 'joint_wav_condition' key)
+                attributes, _ = model._prepare_tokens_and_attributes(
+                    conditions={"joint_wav_condition": [joint_wav_condition], "lyrics": [model._process_lyric(lyrics)]},
+                    prompt=None, prompt_tokens=None
+                )
+                latent_seq, token_seq = model.diffusion.generate(None, attributes, **model.generation_params)
+                audio_recon = model.compression_model.decode(latent_seq).float()
+                torchaudio.save(f'{args.output_dir}/{idx}_s{i}.flac', audio_recon[0].cpu().float(), model.sample_rate)
+                convert_file(f'{args.output_dir}/{idx}_s{i}.flac', f'./wav_output/{idx}_s{i}.wav')
 
 if __name__ == "__main__":
     main()
