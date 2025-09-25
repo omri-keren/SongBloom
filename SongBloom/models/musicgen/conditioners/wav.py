@@ -54,12 +54,19 @@ class AudioTokenizerConditioner(WaveformConditioner):
             else:
                 with torch.no_grad():
                     fusion_method = x.fusion_method[0]
+                    # Process null condition (zeros)
+                    # null_latents = None
+                    null_latents = self.tokenizer.encode(wav[-1].unsqueeze(0))
                     if fusion_method == '' or fusion_method == 'concat_wav':
                         # audio_latents = self.tokenizer.encode(wav).transpose(-1,-2)
-                        audio_latents = self.tokenizer.encode(wav[0].unsqueeze(0)).transpose(-1,-2)
+                        # Process original condition
+                        orig_latents = self.tokenizer.encode(wav[0].unsqueeze(0))
+                        if null_latents is not None:
+                            audio_latents = torch.cat([orig_latents, null_latents], dim=0)
+                        else:
+                            audio_latents = orig_latents
                     else:
                         N = wav.shape[0] - 1 # since there is null condition
-                        # TODO: think what to do with null conditioner
                         # Compute embedding for each wav
                         wav_embeds = []
                         for i in range(N):
@@ -96,7 +103,11 @@ class AudioTokenizerConditioner(WaveformConditioner):
                             elif fused.shape[1] < T_total:
                                 fused = torch.nn.functional.pad(fused, (0, T_total-fused.shape[1]))
                             fused = fused.unsqueeze(0)
-                        audio_latents = fused.transpose(-1, -2)
+                        if null_latents is not None:
+                            audio_latents = torch.cat([fused, null_latents], dim=0)
+                        else:
+                            audio_latents = fused
+                    audio_latents = audio_latents.transpose(-1, -2)
                     # print('transform wav to vae')
             audio_latents = self.output_proj(audio_latents)
 

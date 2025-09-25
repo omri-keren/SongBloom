@@ -41,7 +41,7 @@ def main():
     parser.add_argument("--local-dir", type=str, default="./cache")
     parser.add_argument("--input-jsonl", type=str, default='example/multiple_wavs.jsonl')
     parser.add_argument("--output-dir", type=str, default="./output")
-    parser.add_argument("--n-samples", type=int, default=1)
+    parser.add_argument("--n-samples", type=int, default=5)
     parser.add_argument("--dtype", type=str, default='float32', choices=['float32', 'bfloat16'])
     parser.add_argument("--fusion-method", type=str, default='concat_wav',
                         help="Fusion method for joint_wav_condition: average, product, min, max, concat_embed, concat_wav (concat is deprecated)")
@@ -51,7 +51,7 @@ def main():
     cfg = load_config(f"{args.local_dir}/{args.model_name}.yaml", parent_dir=args.local_dir)
   
     dtype = torch.float32 if args.dtype == 'float32' else torch.bfloat16
-    for fusion_method in ['concat_embed', 'min', 'max', 'product']:
+    for fusion_method in ['concat_wav', 'average', 'concat_embed', 'min', 'max', 'product']:
         model = SongBloom_Sampler.build_from_trainer(cfg, strict=True, dtype=dtype, fusion_method=fusion_method)
         model.set_generation_params(**cfg.inference)
             

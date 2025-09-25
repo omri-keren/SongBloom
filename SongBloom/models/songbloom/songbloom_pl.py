@@ -61,7 +61,7 @@ class SongBloom_PL(pl.LightningModule):
 class SongBloom_Sampler:    
     
     def __init__(self, compression_model: StableVAE, diffusion: MVSA_DiTAR, lyric_processor_key,
-                 max_duration: float, prompt_duration: tp.Optional[float] = None, fusion_method: str = 'average'):
+                 max_duration: float, prompt_duration: tp.Optional[float] = None, fusion_method: str = ''):
         self.compression_model = compression_model
         self.diffusion = diffusion
         self.lyric_processor_key = lyric_processor_key
@@ -82,7 +82,7 @@ class SongBloom_Sampler:
         self._progress_callback: tp.Optional[tp.Callable[[int, int], None]] = None
 
     @classmethod
-    def build_from_trainer(cls, cfg, strict=True, dtype=torch.float32, fusion_method='average'):
+    def build_from_trainer(cls, cfg, strict=True, dtype=torch.float32, fusion_method=''):
         model_light = SongBloom_PL(cfg)
         incompatible = model_light.load_state_dict(torch.load(cfg.pretrained_path, map_location='cpu'), strict=strict)
         

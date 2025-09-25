@@ -7,6 +7,8 @@ from huggingface_hub import hf_hub_download
 
 os.environ['DISABLE_FLASH_ATTN'] = "0"
 from SongBloom.models.songbloom.songbloom_pl import SongBloom_Sampler
+from convert_flac_to_wav import convert_file
+
 
 
 def hf_download(repo_id="CypressYang/SongBloom", model_name="songbloom_full_150s", local_dir="./cache", **kwargs):
@@ -52,9 +54,9 @@ def main():
     # parser.add_argument("--input-jsonl", type=str, required=True)
     # parser.add_argument("--input-jsonl", type=str, default='example/fly.jsonl')
     # parser.add_argument("--input-jsonl", type=str, default='example/universo.jsonl')
-    parser.add_argument("--input-jsonl", type=str, default='example/high_on_life.jsonl')
+    parser.add_argument("--input-jsonl", type=str, default='example/test.jsonl')
     parser.add_argument("--output-dir", type=str, default="./output")
-    parser.add_argument("--n-samples", type=int, default=1)
+    parser.add_argument("--n-samples", type=int, default=5)
     parser.add_argument("--dtype", type=str, default='bfloat16', choices=['float32', 'bfloat16'])
     
     args = parser.parse_args()
@@ -84,6 +86,7 @@ def main():
         for i in range(args.n_samples):
             wav = model.generate(lyrics, prompt_wav)
             torchaudio.save(f'{args.output_dir}/{idx}_s{i}.flac', wav[0].cpu().float(), model.sample_rate)
+            convert_file(f'{args.output_dir}/{idx}_s{i}.flac', f'./wav_output/{idx}_s{i}.wav')
 
 
 if __name__ == "__main__":

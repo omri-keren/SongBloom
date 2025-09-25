@@ -793,7 +793,7 @@ class ConditioningProvider(nn.Module):
                     else:
                         wav = wav.expand(1 ,1, wav_shape)  # [1, C, T]
                         length = length[0:1]
-                    wavs[attribute].append(wav)
+                        wavs[attribute].append(wav)
                 else:
                     wavs[attribute].append(wav)  # [C, T]
                     has_fusion = True
